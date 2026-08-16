@@ -1,0 +1,111 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(groupId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function isOwner(groupId) {
+      return signedIn() &&
+        get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+
+      match /memberships/{groupId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+
+      match /groupMeta/{groupId} {
+        allow read, write: if signedIn() && request.auth.uid == uid && isMember(groupId);
+      }
+    }
+
+    match /groups/{groupId} {
+      allow read: if isMember(groupId);
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isOwner(groupId) ||
+        (isMember(groupId) && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['currentPlanId']));
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(groupId);
+        allow create: if signedIn() && request.auth.uid == uid;
+        allow update: if isMember(groupId) &&
+          (request.auth.uid == uid || isOwner(groupId));
+        allow delete: if signedIn() && (request.auth.uid == uid || isOwner(groupId));
+      }
+
+      match /feed/{feedId} {
+        allow read: if isMember(groupId);
+        allow create: if isMember(groupId);
+        allow update: if isMember(groupId);
+        allow delete: if false;
+      }
+    }
+
+    match /pets/{petId} {
+      allow read: if signedIn() && isMember(resource.data.groupId);
+      allow create: if signedIn();
+      allow update: if signedIn() && isMember(resource.data.groupId);
+      allow delete: if false;
+    }
+
+    match /plans/{planId} {
+      allow read: if signedIn() && isMember(resource.data.groupId);
+      allow create: if signedIn() && isMember(request.resource.data.groupId);
+      allow update: if signedIn() && isMember(resource.data.groupId);
+      allow delete: if false;
+    }
+
+    match /progress/{progressId} {
+      allow read: if signedIn() && isMember(resource.data.groupId);
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+        && isMember(request.resource.data.groupId);
+      allow update: if signedIn() && isMember(resource.data.groupId) &&
+        (resource.data.uid == request.auth.uid ||
+          request.resource.data.status in ['done', 'pending_review']);
+      allow delete: if false;
+    }
+
+    match /evidence/{evidenceId} {
+      allow read: if signedIn() && isMember(resource.data.groupId);
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+        && isMember(request.resource.data.groupId);
+      allow update: if signedIn() && isMember(resource.data.groupId) &&
+        request.auth.uid != resource.data.uid;
+      allow delete: if false;
+    }
+
+    match /goalCache/{key} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if false;
+    }
+
+    match /achievements/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if false;
+    }
+
+    match /inviteIndex/{code} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
